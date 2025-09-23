@@ -3,9 +3,9 @@ pandas
 numpy
 openpyxl
 python-dateutil
-
 matplotlib
 seaborn
 plotly
+requests
+statsmodels    
 
-altair    
