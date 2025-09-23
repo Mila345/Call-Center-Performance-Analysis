@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore')
 
 # Streamlit page configuration
 st.set_page_config(page_title="Contact Center Analysis", layout="wide")
-st.title("Multi-Channel Contact Center Performance Dashboard")
+st.title("Contact Center Performance Dashboard")
 
 # --- Helper: robust duration parser -> seconds (never raises) ---
 def _normalize_duration_column(df: pd.DataFrame, col: str) -> None:
@@ -220,8 +220,8 @@ def create_daily_trends(phone_data, case_data):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    correlation = daily_combined['Phone_Volume'].corr(daily_combined['Case_Volume'])
-    st.metric("Daily Volume Correlation", f"{correlation:.3f}")
+    #correlation = daily_combined['Phone_Volume'].corr(daily_combined['Case_Volume'])
+    #st.metric("Daily Volume Correlation", f"{correlation:.3f}")
     return daily_combined
 
 def analyze_phone_performance(phone_data):
