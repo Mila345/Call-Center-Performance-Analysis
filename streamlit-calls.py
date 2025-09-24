@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 
 # Streamlit page configuration
 st.set_page_config(page_title="Contact Center Analysis", layout="wide")
-st.title("🏢 Contact Center Performance Dashboard")
+st.title("Contact Center Performance Dashboard")
 
 # Helper: robust duration parser -> seconds (never raises)
 def _normalize_duration_column(df: pd.DataFrame, col: str) -> None:
