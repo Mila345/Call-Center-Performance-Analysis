@@ -1,14 +1,119 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
-# Add these functions and modifications to your existing Streamlit code
-
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
+
+# Streamlit page configuration
+st.set_page_config(page_title="Contact Center Analysis", layout="wide")
+st.title("🏢 Contact Center Performance Dashboard")
+
+# Helper: robust duration parser -> seconds (never raises)
+def _normalize_duration_column(df: pd.DataFrame, col: str) -> None:
+    """
+    Safely convert a duration-like column to seconds.
+    Handles:
+      - timedelta dtype
+      - numeric seconds
+      - HH:MM:SS strings (and similar)
+      - messy strings with units/symbols
+    Leaves NaN where parsing fails.
+    """
+    if col not in df.columns:
+        return
+
+    s = df[col]
+
+    # timedelta -> seconds
+    if pd.api.types.is_timedelta64_dtype(s):
+        df[col] = s.dt.total_seconds()
+        return
+
+    # numeric -> coerce numeric
+    if pd.api.types.is_numeric_dtype(s):
+        df[col] = pd.to_numeric(s, errors="coerce")
+        return
+
+    # object/mixed: parse safely
+    s_str = s.astype(str)
+    seconds = pd.Series(np.nan, index=s.index, dtype="float64")
+
+    # entries with ":" likely time strings -> try timedelta
+    mask_colon = s_str.str.contains(":", regex=False, na=False)
+    if mask_colon.any():
+        try:
+            td = pd.to_timedelta(s_str[mask_colon], errors="coerce")
+            seconds.loc[mask_colon] = td.dt.total_seconds()
+        except Exception:
+            # per-item fallback if needed
+            seconds.loc[mask_colon] = s_str[mask_colon].apply(
+                lambda x: pd.to_timedelta(x, errors="coerce")
+            ).dt.total_seconds()
+
+    # everything else: strip non-numeric and coerce
+    stripped = s_str[~mask_colon].str.replace(r"[^0-9\.\-eE]", "", regex=True)
+    seconds.loc[~mask_colon] = pd.to_numeric(stripped, errors="coerce")
+
+    df[col] = seconds
+
+@st.cache_data
+def load_and_preprocess_data(file_path='datatest.xlsx'):
+    """Load and preprocess both sheets with proper data type handling"""
+    try:
+        # Load
+        phone_data = pd.read_excel(file_path, sheet_name='Phone Data')
+        case_data  = pd.read_excel(file_path, sheet_name='Case Data')
+
+        # --- Phone preprocessing ---
+        phone_data['Call Time'] = pd.to_datetime(phone_data['Call Time'], errors='coerce')
+        phone_data['Call Date'] = phone_data['Call Time'].dt.date
+        phone_data['Call_Hour'] = phone_data['Call Time'].dt.hour  # Use underscore to avoid conflicts
+
+        # Fix the Week column issue - convert Period to string
+        if 'week' in phone_data.columns:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                phone_data['Week_Number'] = phone_data['week'].astype(str)
+
+        # Normalize duration columns to seconds (robust)
+        duration_cols = [
+            'Ringing', 'Talking', 'Ring time', 'Wait Time in Queue',
+            'Total Waiting Time (queue+ring)', 'Talk Time',
+            'Total Call Duration (excl IVR)'
+        ]
+        for col in duration_cols:
+            _normalize_duration_column(phone_data, col)
+
+        # Other numeric columns
+        if 'Cost' in phone_data.columns:
+            phone_data['Cost'] = pd.to_numeric(phone_data['Cost'], errors='coerce')
+
+        # --- Case preprocessing ---
+        case_data['Created Date'] = pd.to_datetime(case_data['Created Date'], errors='coerce')
+        case_data['Closed Date']  = pd.to_datetime(case_data['Closed Date'],  errors='coerce')
+        case_data['Case Date']    = case_data['Created Date'].dt.date
+        case_data['Case_Hour']    = case_data['Created Date'].dt.hour
+
+        # Calculate case duration in hours
+        case_data['Case Duration (Hours)'] = (
+            case_data['Closed Date'] - case_data['Created Date']
+        ).dt.total_seconds() / 3600
+
+        # Convert email columns to numeric
+        for col in ['Number of Emails Received', 'Number of Emails Sent']:
+            if col in case_data.columns:
+                case_data[col] = pd.to_numeric(case_data[col], errors='coerce')
+
+        return phone_data, case_data
+
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None, None
 
 # 1. STANDARDIZE ROUNDING FUNCTION
 def standardize_metrics(value, decimals=2):
@@ -49,6 +154,40 @@ def create_overview_metrics(phone_data, case_data):
             avg_cost = phone_data['Cost'].mean(skipna=True)
             # Use 3 decimal places for cost per call as it's very small
             st.metric("Avg Cost/Call", f"${standardize_metrics(avg_cost, 3):,.3f}")
+
+def create_hourly_analysis(phone_data, case_data):
+    """Create hourly pattern analysis"""
+    st.subheader("📊 Hourly Pattern Analysis")
+
+    phone_hourly = phone_data.groupby('Call_Hour').size().reset_index()
+    phone_hourly.columns = ['Hour', 'Phone_Calls']
+
+    case_hourly = case_data.groupby('Case_Hour').size().reset_index()
+    case_hourly.columns = ['Hour', 'Cases']
+
+    hourly_combined = pd.merge(phone_hourly, case_hourly, on='Hour', how='outer').fillna(0)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=hourly_combined['Hour'],
+        y=hourly_combined['Phone_Calls'],
+        name='Phone Calls',
+        marker_color='lightblue'
+    ))
+    fig.add_trace(go.Bar(
+        x=hourly_combined['Hour'],
+        y=hourly_combined['Cases'],
+        name='Cases Created',
+        marker_color='lightcoral'
+    ))
+    fig.update_layout(
+        title='Hourly Distribution: Phone Calls vs Cases',
+        xaxis_title='Hour of Day',
+        yaxis_title='Volume',
+        barmode='group'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    return hourly_combined
 
 # 3. MODIFIED create_daily_trends function with correlation added
 def create_daily_trends(phone_data, case_data):
@@ -104,6 +243,45 @@ def add_peak_hour_analysis(phone_data):
         
         # Add this as an info box in the overview section
         st.info(f"📊 Peak Hour Analysis: {peak_hour}:00 with {peak_volume:,} calls ({standardize_metrics((peak_volume/len(phone_data))*100, 1)}% of daily volume)")
+
+def analyze_phone_performance(phone_data):
+    """Analyze phone channel performance"""
+    st.subheader("📞 Phone Channel Analysis")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if 'Status' in phone_data.columns:
+            status_counts = phone_data['Status'].value_counts()
+            fig = px.pie(
+                values=status_counts.values,
+                names=status_counts.index,
+                title='Call Status Distribution'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        if 'SLA breach' in phone_data.columns:
+            sla_breach_count = pd.to_numeric(phone_data['SLA breach'], errors='coerce').fillna(0).sum()
+            sla_compliance_count = len(phone_data) - sla_breach_count
+            fig = px.pie(
+                values=[sla_compliance_count, sla_breach_count],
+                names=['SLA Compliant', 'SLA Breach'],
+                title='SLA Performance',
+                color_discrete_map={'SLA Compliant': 'green', 'SLA Breach': 'red'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    if 'Talk Time' in phone_data.columns:
+        talk_times = phone_data['Talk Time'].dropna()
+        if len(talk_times) > 0:
+            fig = px.histogram(
+                x=talk_times,
+                nbins=30,
+                title='Talk Time Distribution',
+                labels={'x': 'Talk Time (seconds)', 'y': 'Frequency'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 # 5. ENHANCED analyze_case_performance with consistent formatting
 def analyze_case_performance(case_data):
@@ -172,6 +350,71 @@ def add_sla_metrics(phone_data):
             st.metric("SLA Compliance Rate", f"{standardize_metrics(sla_compliance_rate, 1)}%")
         with col2:
             st.metric("SLA Breach Rate", f"{standardize_metrics(sla_breach_rate, 1)}%")
+
+def create_correlation_analysis(phone_data, case_data, daily_combined):
+    """Create correlation analysis"""
+    st.subheader("🔗 Cross-Channel Correlation Analysis")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Use trendline if statsmodels is installed; else skip
+        trend = 'ols'
+        try:
+            import statsmodels.api as sm  # noqa: F401
+        except Exception:
+            trend = None
+
+        fig = px.scatter(
+            daily_combined,
+            x='Phone_Volume',
+            y='Case_Volume',
+            title='Phone vs Case Daily Volume Correlation',
+            trendline=trend
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        phone_numeric = phone_data.select_dtypes(include=[np.number])
+        if len(phone_numeric.columns) > 1:
+            corr_matrix = phone_numeric.corr()
+            fig = px.imshow(
+                corr_matrix,
+                title='Phone Data Correlation Matrix',
+                color_continuous_scale='RdBu_r',
+                aspect='auto'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+def display_data_quality_report(phone_data, case_data):
+    """Display data quality analysis"""
+    st.subheader("🔍 Data Quality Report")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("**Phone Data Missing Values:**")
+        phone_missing = phone_data.isnull().sum()
+        phone_missing_pct = (phone_missing / max(len(phone_data), 1)) * 100
+        phone_quality_df = pd.DataFrame({
+            'Column': phone_missing.index,
+            'Missing Count': phone_missing.values,
+            'Missing %': phone_missing_pct.values
+        })
+        phone_quality_df = phone_quality_df[phone_quality_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+        st.dataframe(phone_quality_df, use_container_width=True)
+
+    with col2:
+        st.write("**Case Data Missing Values:**")
+        case_missing = case_data.isnull().sum()
+        case_missing_pct = (case_missing / max(len(case_data), 1)) * 100
+        case_quality_df = pd.DataFrame({
+            'Column': case_missing.index,
+            'Missing Count': case_missing.values,
+            'Missing %': case_missing_pct.values
+        })
+        case_quality_df = case_quality_df[case_quality_df['Missing Count'] > 0].sort_values('Missing Count', ascending=False)
+        st.dataframe(case_quality_df, use_container_width=True)
 
 # 7. UPDATED MAIN FUNCTION with all fixes
 def main():
@@ -252,4 +495,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
