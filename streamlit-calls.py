@@ -229,8 +229,8 @@ def create_daily_trends(phone_data, case_data):
     st.plotly_chart(fig, use_container_width=True)
 
     # ADD MISSING CORRELATION METRIC
-    correlation = daily_combined['Phone_Volume'].corr(daily_combined['Case_Volume'])
-    st.metric("Daily Volume Correlation", f"{standardize_metrics(correlation, 3)}")
+    #correlation = daily_combined['Phone_Volume'].corr(daily_combined['Case_Volume'])
+    #st.metric("Daily Volume Correlation", f"{standardize_metrics(correlation, 3)}")
     
     return daily_combined
 
@@ -242,7 +242,7 @@ def add_peak_hour_analysis(phone_data):
         peak_volume = phone_data['Call_Hour'].value_counts().max()
         
         # Add this as an info box in the overview section
-        st.info(f"📊 Peak Hour Analysis: {peak_hour}:00 with {peak_volume:,} calls ({standardize_metrics((peak_volume/len(phone_data))*100, 1)}% of daily volume)")
+        st.info(f"📊 Peak Hour: {peak_hour}:00 with {peak_volume:,} calls ({standardize_metrics((peak_volume/len(phone_data))*100, 1)}% of daily volume)")
 
 def analyze_phone_performance(phone_data):
     """Analyze phone channel performance"""
