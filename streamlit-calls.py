@@ -150,10 +150,10 @@ def create_overview_metrics(phone_data, case_data):
     with col4:
         if 'Cost' in phone_data.columns:
             total_cost = phone_data['Cost'].sum(skipna=True)
-            st.metric("Total Phone Cost", f"${standardize_metrics(total_cost, 2):,.2f}")
+            st.metric("Total Phone Cost", f"€{standardize_metrics(total_cost, 2):,.2f}")
             avg_cost = phone_data['Cost'].mean(skipna=True)
             # Use 3 decimal places for cost per call as it's very small
-            st.metric("Avg Cost/Call", f"${standardize_metrics(avg_cost, 3):,.3f}")
+            st.metric("Avg Cost/Call", f"€{standardize_metrics(avg_cost, 3):,.3f}")
 
 def create_hourly_analysis(phone_data, case_data):
     """Create hourly pattern analysis"""
